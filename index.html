@@ -29,14 +29,14 @@
   #preview { overflow-x: auto; }
   #ticket .c { text-align: center; }
   #ticket .b { font-size: 1.15em; font-weight: 900; }
-  #ticket .big { font-size: 2.2em; font-weight: 900; line-height: 1.15; }
-  #ticket .kv { display: flex; justify-content: space-between; gap: 2mm; }
+  #ticket .big { font-size: 2em; font-weight: 900; line-height: 1.15; }
+  #ticket .kv { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2mm; }
   #ticket .kv span:last-child { text-align: right; }
   #ticket hr { border: 0; border-top: .6mm dashed #000; margin: 1.5mm 0; }
   @media print {
     body { background:#fff; }
     main { padding: 0; max-width: none; }
-    #ticket { box-shadow: none; }
+    #ticket { box-shadow: none; margin: 1mm; } /* pegado a la izquierda: el cabezal empieza ahí */
     main > *:not(#preview) { display:none !important; }
     #preview { border:0; padding:0; margin:0; }
     #preview > h2 { display:none; }
@@ -83,6 +83,8 @@
       <label for="c_fono">Teléfono</label><input id="c_fono">
       <label for="c_pie">Mensaje al pie</label><textarea id="c_pie" rows="2"></textarea>
       <label for="c_folio">Próximo N° de comprobante</label><input id="c_folio" type="number" min="1">
+      <label for="c_ancho">Ancho impresión PC en mm (bajar si corta a la derecha)</label><input id="c_ancho" type="number" step="1" min="40" max="80">
+      <label for="c_letra">Tamaño de letra en mm (3.2 normal)</label><input id="c_letra" type="number" step="0.1" min="2" max="5">
       <label for="c_chunk">Bytes por envío BT (bajar a 20 si la impresora corta el texto)</label><input id="c_chunk" type="number" min="20">
       <div class="row" style="margin-top:14px"><button id="btnGuardar" class="sec">Guardar</button></div>
     </details>
@@ -92,12 +94,12 @@
 <script>
 const $ = id => document.getElementById(id);
 const DEF = { nombre:'MI NEGOCIO', rut:'11.111.111-1', dir:'Dirección 123, Ciudad', fono:'+56 9 1234 5678',
-              pie:'Gracias por su preferencia', folio:1, chunk:100 };
+              pie:'Gracias por su preferencia', folio:1, chunk:100, ancho:68, letra:3.2 };
 const load = () => { try { return { ...DEF, ...JSON.parse(localStorage.getItem('cfg') || '{}') }; } catch { return { ...DEF }; } };
 const save = c => { try { localStorage.setItem('cfg', JSON.stringify(c)); } catch {} };
 let cfg = load();
 
-const campos = { nombre:'c_nombre', rut:'c_rut', dir:'c_dir', fono:'c_fono', pie:'c_pie', folio:'c_folio', chunk:'c_chunk' };
+const campos = { nombre:'c_nombre', rut:'c_rut', dir:'c_dir', fono:'c_fono', pie:'c_pie', folio:'c_folio', chunk:'c_chunk', ancho:'c_ancho', letra:'c_letra' };
 for (const [k, id] of Object.entries(campos)) $(id).value = cfg[k];
 try { $('papel').value = localStorage.getItem('papel') || '58'; } catch {}
 
@@ -144,10 +146,11 @@ function ticket(folio, fecha) {
 function render() {
   const mm = +$('papel').value, T = $('ticket');
   const esc = s => s.replace(/[&<>]/g, m => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' })[m]);
-  // Márgenes laterales = zona no imprimible del cabezal (80mm imprime ~72mm, 58mm ~48mm). Ajustar aquí si corta.
-  T.style.width = mm + 'mm';
-  T.style.setProperty('--mx', mm === 80 ? '4mm' : '5mm');
-  T.style.setProperty('--fs', mm === 80 ? '4mm' : '3.3mm');
+  // Ancho = zona que realmente imprime el cabezal (papel 80mm imprime ~72mm, 58mm ~48mm). Se calibra en "Datos del negocio".
+  const k = mm === 80 ? 1 : 48 / 72;
+  T.style.width = (+cfg.ancho || 68) * k + 'mm';
+  T.style.setProperty('--mx', '0mm');
+  T.style.setProperty('--fs', (+cfg.letra || 3.2) * (mm === 80 ? 1 : 0.9) + 'mm');
   // En HTML el navegador ajusta el texto solo: se usa el texto original (src), no el cortado a N columnas
   T.innerHTML = ticket(cfg.folio, new Date()).filter((l, i, a) => !l.src || l.src !== a[i - 1]?.src).map(l => (l.src ? { ...l, t: l.src } : l)).map(l =>
     l.sep ? '<hr>' :
@@ -223,7 +226,7 @@ $('btnPc').onclick = () => {
 
 $('btnGuardar').onclick = () => {
   for (const [k, id] of Object.entries(campos)) cfg[k] = $(id).value.trim();
-  cfg.folio = parseInt(cfg.folio, 10) || 1; cfg.chunk = parseInt(cfg.chunk, 10) || 100;
+  cfg.folio = parseInt(cfg.folio, 10) || 1; cfg.chunk = parseInt(cfg.chunk, 10) || 100; cfg.ancho = +cfg.ancho || 68; cfg.letra = +cfg.letra || 3.2;
   save(cfg); render(); estado('Datos guardados');
 };
 
