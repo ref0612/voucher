@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Comprobantes de Pago</title>
+<style>
+  :root { --bg:#f4f5f7; --card:#fff; --ink:#1b1f24; --muted:#6b7280; --accent:#0a66c2; --line:#d9dde3; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--ink); }
+  main { max-width: 520px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.2rem; margin: 0 0 12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:12px; }
+  label { display:block; font-size:.85rem; color:var(--muted); margin:10px 0 4px; }
+  input, select, textarea { width:100%; padding:10px; font-size:1rem; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink); }
+  #monto { font-size: 2rem; font-weight: 700; text-align: right; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; }
+  .row > * { flex:1; }
+  button { padding:14px; font-size:1rem; border:0; border-radius:8px; background:var(--accent); color:#fff; font-weight:600; cursor:pointer; min-width: 140px; }
+  button.sec { background:#e6e9ee; color:var(--ink); }
+  button:disabled { opacity:.5; }
+  #estado { font-size:.85rem; color:var(--muted); margin-top:8px; min-height:1.2em; }
+  details summary { cursor:pointer; font-weight:600; }
+  /* Vista previa = lo mismo que se imprime */
+  /* Térmica: todo negro puro y en negrita, sin grises (el driver los convierte en puntos tenues) */
+  #ticket { font-family: Arial, Helvetica, sans-serif; font-weight: 700; color:#000; background:#fff; margin: 0 auto;
+            font-size: var(--fs, 3.6mm); line-height: 1.35; padding: 2mm var(--mx, 4mm); box-shadow: 0 0 0 1px var(--line);
+            -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  #preview { overflow-x: auto; }
+  #ticket .c { text-align: center; }
+  #ticket .b { font-size: 1.15em; font-weight: 900; }
+  #ticket .big { font-size: 2.2em; font-weight: 900; line-height: 1.15; }
+  #ticket .kv { display: flex; justify-content: space-between; gap: 2mm; }
+  #ticket .kv span:last-child { text-align: right; }
+  #ticket hr { border: 0; border-top: .6mm dashed #000; margin: 1.5mm 0; }
+  @media print {
+    body { background:#fff; }
+    main { padding: 0; max-width: none; }
+    #ticket { box-shadow: none; }
+    main > *:not(#preview) { display:none !important; }
+    #preview { border:0; padding:0; margin:0; }
+    #preview > h2 { display:none; }
+  }
+</style>
+<style id="pagina"></style>
+</head>
+<body>
+<main>
+  <h1>Comprobante de Pago</h1>
+
+  <div class="card">
+    <label for="monto">Monto ($)</label>
+    <input id="monto" inputmode="numeric" autocomplete="off" placeholder="0" autofocus>
+    <label for="medio">Medio de pago</label>
+    <select id="medio">
+      <option>Efectivo</option><option>Tarjeta Débito</option><option>Tarjeta Crédito</option><option>Transferencia</option>
+    </select>
+    <label for="glosa">Concepto (opcional)</label>
+    <input id="glosa" placeholder="Ej: Pasaje Santiago - Valparaíso">
+    <label for="papel">Papel</label>
+    <select id="papel">
+      <option value="58">58 mm (teléfono / Bluetooth)</option>
+      <option value="80">80 mm (PC)</option>
+    </select>
+    <div class="row" style="margin-top:14px">
+      <button id="btnBt">Imprimir Bluetooth</button>
+      <button id="btnPc" class="sec">Imprimir (PC / diálogo)</button>
+    </div>
+    <div id="estado"></div>
+  </div>
+
+  <div class="card" id="preview">
+    <h2 style="font-size:.9rem;color:var(--muted);margin:0 0 8px">Vista previa</h2>
+    <div id="ticket"></div>
+  </div>
+
+  <div class="card">
+    <details>
+      <summary>Datos del negocio</summary>
+      <label for="c_nombre">Nombre / Razón social</label><input id="c_nombre">
+      <label for="c_rut">RUT</label><input id="c_rut">
+      <label for="c_dir">Dirección</label><input id="c_dir">
+      <label for="c_fono">Teléfono</label><input id="c_fono">
+      <label for="c_pie">Mensaje al pie</label><textarea id="c_pie" rows="2"></textarea>
+      <label for="c_folio">Próximo N° de comprobante</label><input id="c_folio" type="number" min="1">
+      <label for="c_chunk">Bytes por envío BT (bajar a 20 si la impresora corta el texto)</label><input id="c_chunk" type="number" min="20">
+      <div class="row" style="margin-top:14px"><button id="btnGuardar" class="sec">Guardar</button></div>
+    </details>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const DEF = { nombre:'MI NEGOCIO', rut:'11.111.111-1', dir:'Dirección 123, Ciudad', fono:'+56 9 1234 5678',
+              pie:'Gracias por su preferencia', folio:1, chunk:100 };
+const load = () => { try { return { ...DEF, ...JSON.parse(localStorage.getItem('cfg') || '{}') }; } catch { return { ...DEF }; } };
+const save = c => { try { localStorage.setItem('cfg', JSON.stringify(c)); } catch {} };
+let cfg = load();
+
+const campos = { nombre:'c_nombre', rut:'c_rut', dir:'c_dir', fono:'c_fono', pie:'c_pie', folio:'c_folio', chunk:'c_chunk' };
+for (const [k, id] of Object.entries(campos)) $(id).value = cfg[k];
+try { $('papel').value = localStorage.getItem('papel') || '58'; } catch {}
+
+const clp = n => '$' + n.toLocaleString('es-CL');
+const montoNum = () => parseInt($('monto').value.replace(/\D/g, ''), 10) || 0;
+const cols = () => $('papel').value === '80' ? 48 : 32;
+
+// ---- Construcción del ticket: lista de líneas {t, center, bold, big} ----
+function wrap(text, w) {
+  const out = []; let line = '';
+  for (const word of String(text).split(/\s+/).filter(Boolean)) {
+    if ((line + ' ' + word).trim().length > w) { if (line) out.push(line); line = word; while (line.length > w) { out.push(line.slice(0, w)); line = line.slice(w); } }
+    else line = (line + ' ' + word).trim();
+  }
+  if (line) out.push(line);
+  return out;
+}
+const lr = (a, b, w) => a + ' '.repeat(Math.max(1, w - a.length - b.length)) + b;
+
+function ticket(folio, fecha) {
+  const w = cols(), L = [];
+  const add = (t, o = {}) => L.push({ t, ...o });
+  const kv = (a, b) => add(lr(a, b, w), { l: a, r: b });
+  const c = (t, o) => wrap(t, o?.big ? w / 2 : w).forEach(x => add(x, { center: true, src: t, ...o }));
+  c(cfg.nombre, { bold: true });
+  if (cfg.rut) c('RUT: ' + cfg.rut);
+  if (cfg.dir) c(cfg.dir);
+  if (cfg.fono) c('Tel: ' + cfg.fono);
+  add('-'.repeat(w), { sep: true });
+  c('COMPROBANTE DE PAGO', { bold: true });
+  kv('N°', String(folio).padStart(6, '0'));
+  kv('Fecha', fecha.toLocaleDateString('es-CL') + ' ' + fecha.toLocaleTimeString('es-CL', { hour:'2-digit', minute:'2-digit', hour12:false }));
+  kv('Medio', $('medio').value);
+  const g = $('glosa').value.trim();
+  if (g) { add('Concepto:'); wrap(g, w).forEach(x => add(x, { src: g })); }
+  add('-'.repeat(w), { sep: true });
+  c('TOTAL', { bold: true });
+  c(clp(montoNum()), { bold: true, big: true });
+  add('-'.repeat(w), { sep: true });
+  if (cfg.pie) c(cfg.pie);
+  return L;
+}
+
+function render() {
+  const mm = +$('papel').value, T = $('ticket');
+  const esc = s => s.replace(/[&<>]/g, m => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' })[m]);
+  // Márgenes laterales = zona no imprimible del cabezal (80mm imprime ~72mm, 58mm ~48mm). Ajustar aquí si corta.
+  T.style.width = mm + 'mm';
+  T.style.setProperty('--mx', mm === 80 ? '4mm' : '5mm');
+  T.style.setProperty('--fs', mm === 80 ? '4mm' : '3.3mm');
+  // En HTML el navegador ajusta el texto solo: se usa el texto original (src), no el cortado a N columnas
+  T.innerHTML = ticket(cfg.folio, new Date()).filter((l, i, a) => !l.src || l.src !== a[i - 1]?.src).map(l => (l.src ? { ...l, t: l.src } : l)).map(l =>
+    l.sep ? '<hr>' :
+    l.l ? `<div class="kv"><span>${esc(l.l)}</span><span>${esc(l.r)}</span></div>` :
+    `<div class="${[l.center && 'c', l.bold && 'b', l.big && 'big'].filter(Boolean).join(' ')}">${esc(l.t)}</div>`).join('');
+  // Sin 'size': manda el papel del driver (ej. BIXOLON 80x297). Si no coincide, Chrome escala y centra el ticket.
+  $('pagina').textContent = '@page { margin: 0; }';
+}
+
+// ---- ESC/POS ----
+// ponytail: quita tildes/ñ porque cada impresora usa otra página de códigos; si la tuya soporta CP850, se puede mapear.
+const ascii = s => s.normalize('NFD').replace(/\p{M}/gu, '').replace(/ñ/g, 'n').replace(/Ñ/g, 'N').replace(/°/g, 'o').replace(/[^\x20-\x7e]/g, '?');
+function escpos(lines) {
+  const b = [0x1b, 0x40];
+  for (const l of lines) {
+    b.push(0x1b, 0x61, l.center ? 1 : 0, 0x1b, 0x45, l.bold ? 1 : 0, 0x1d, 0x21, l.big ? 0x11 : 0);
+    for (const ch of ascii(l.t)) b.push(ch.charCodeAt(0));
+    b.push(0x0a);
+  }
+  b.push(0x1b, 0x61, 0, 0x1d, 0x21, 0, 0x1b, 0x64, 4, 0x1d, 0x56, 0x42, 0x00); // avanzar + corte (ignorado si no tiene cortador)
+  return new Uint8Array(b);
+}
+
+// ---- Bluetooth (BLE, Chrome Android / Chrome PC) ----
+const SERVICIOS = ['000018f0-0000-1000-8000-00805f9b34fb', 'e7810a71-73ae-499d-8c15-faa9aef0c3f2',
+                   '49535343-fe7d-4ae5-8fa9-9fafd205e455', '0000ff00-0000-1000-8000-00805f9b34fb', '0000ffe0-0000-1000-8000-00805f9b34fb'];
+let caract = null;
+async function conectar() {
+  if (caract?.service.device.gatt.connected) return caract;
+  const dev = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: SERVICIOS });
+  const gatt = await dev.gatt.connect();
+  for (const s of await gatt.getPrimaryServices())
+    for (const ch of await s.getCharacteristics())
+      if (ch.properties.write || ch.properties.writeWithoutResponse) return caract = ch;
+  throw new Error('La impresora no expone una característica de escritura');
+}
+async function enviarBT(data) {
+  const ch = await conectar(), n = Math.max(20, +cfg.chunk || 100);
+  for (let i = 0; i < data.length; i += n) {
+    const part = data.slice(i, i + n);
+    ch.properties.writeWithoutResponse ? await ch.writeValueWithoutResponse(part) : await ch.writeValue(part);
+  }
+}
+
+// ---- Acciones ----
+const estado = t => $('estado').textContent = t;
+function validar() {
+  if (montoNum() <= 0) { estado('Ingresa un monto válido'); $('monto').focus(); return false; }
+  return true;
+}
+function siguiente() {
+  cfg.folio = (+cfg.folio || 1) + 1; save(cfg); $('c_folio').value = cfg.folio;
+  $('monto').value = ''; $('glosa').value = ''; render(); $('monto').focus();
+}
+
+$('btnBt').onclick = async () => {
+  if (!validar()) return;
+  if (!navigator.bluetooth) return estado('Este navegador no soporta Bluetooth. Usa Chrome en Android (o "Imprimir PC").');
+  const folio = cfg.folio;
+  try {
+    $('btnBt').disabled = true; estado('Conectando…');
+    await enviarBT(escpos(ticket(folio, new Date())));
+    estado(`Comprobante N° ${folio} impreso`); siguiente();
+  } catch (e) { estado('Error: ' + e.message); }
+  finally { $('btnBt').disabled = false; }
+};
+
+$('btnPc').onclick = () => {
+  if (!validar()) return;
+  render(); window.print();
+  estado(`Comprobante N° ${cfg.folio} enviado a impresión`); siguiente();
+};
+
+$('btnGuardar').onclick = () => {
+  for (const [k, id] of Object.entries(campos)) cfg[k] = $(id).value.trim();
+  cfg.folio = parseInt(cfg.folio, 10) || 1; cfg.chunk = parseInt(cfg.chunk, 10) || 100;
+  save(cfg); render(); estado('Datos guardados');
+};
+
+$('monto').oninput = e => { const n = montoNum(); e.target.value = n ? n.toLocaleString('es-CL') : ''; render(); };
+$('glosa').oninput = $('medio').onchange = render;
+$('papel').onchange = () => { try { localStorage.setItem('papel', $('papel').value); } catch {} render(); };
+$('monto').onkeydown = e => { if (e.key === 'Enter') ($('papel').value === '58' ? $('btnBt') : $('btnPc')).click(); };
+render();
+</script>
+</body>
+</html>
