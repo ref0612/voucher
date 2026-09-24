@@ -21,18 +21,25 @@
   button:disabled { opacity:.5; }
   #estado { font-size:.85rem; color:var(--muted); margin-top:8px; min-height:1.2em; }
   details summary { cursor:pointer; font-weight:600; }
-  /* Vista previa = lo mismo que se imprime */
-  /* Térmica: todo negro puro y en negrita, sin grises (el driver los convierte en puntos tenues) */
-  #ticket { font-family: Arial, Helvetica, sans-serif; font-weight: 700; color:#000; background:#fff; margin: 0 auto;
-            font-size: var(--fs, 3.6mm); line-height: 1.35; padding: 2mm var(--mx, 4mm); box-shadow: 0 0 0 1px var(--line);
-            -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  /* Ticket (vista previa = impresión). Térmica: solo negro puro, sin grises (el driver los vuelve puntos tenues) */
   #preview { overflow-x: auto; }
-  #ticket .c { text-align: center; }
-  #ticket .b { font-size: 1.15em; font-weight: 900; }
-  #ticket .big { font-size: 2em; font-weight: 900; line-height: 1.15; }
-  #ticket .kv { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2mm; }
-  #ticket .kv span:last-child { text-align: right; }
-  #ticket hr { border: 0; border-top: .6mm dashed #000; margin: 1.5mm 0; }
+  #ticket { font-family: Arial, Helvetica, sans-serif; color:#000; background:#fff; margin: 0 auto; font-size: var(--fs, 3.2mm);
+            line-height: 1.35; padding: 3mm 2mm 4mm; box-shadow: 0 0 0 1px var(--line);
+            -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  #ticket .head { text-align: center; }
+  #ticket .marca { font-size: 1.7em; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; line-height: 1.1; }
+  #ticket .sub { font-weight: 600; font-size: .92em; }
+  #ticket .banda { background:#000; color:#fff; text-align:center; font-weight:900; letter-spacing:.12em; padding: 1.2mm 0; margin: 3mm 0 2.5mm; font-size: 1.05em; }
+  #ticket table { width:100%; border-collapse: collapse; }
+  #ticket td { padding: .6mm 0; vertical-align: top; }
+  #ticket td:first-child { font-weight: 600; text-transform: uppercase; font-size: .85em; letter-spacing: .04em; padding-top: .9mm; }
+  #ticket td:last-child { text-align: right; font-weight: 700; }
+  #ticket .glosa { margin-top: 1.5mm; font-weight: 600; }
+  #ticket .total { border: .7mm solid #000; margin: 3mm 0; padding: 1.5mm 2.5mm; display:flex; justify-content: space-between; align-items: center; }
+  #ticket .total span { font-weight: 900; letter-spacing: .08em; font-size: .95em; }
+  #ticket .total b { font-size: 2.3em; font-weight: 900; line-height: 1.1; }
+  #ticket .pie { white-space: pre-line; text-align:center; font-weight: 700; border-top: .5mm dashed #000; padding-top: 2mm; }
+  #ticket .mini { text-align:center; font-size: .8em; font-weight: 600; margin-top: 1.5mm; }
   @media print {
     body { background:#fff; }
     main { padding: 0; max-width: none; }
@@ -101,7 +108,7 @@ let cfg = load();
 
 const campos = { nombre:'c_nombre', rut:'c_rut', dir:'c_dir', fono:'c_fono', pie:'c_pie', folio:'c_folio', chunk:'c_chunk', ancho:'c_ancho', letra:'c_letra' };
 for (const [k, id] of Object.entries(campos)) $(id).value = cfg[k];
-try { $('papel').value = localStorage.getItem('papel') || '58'; } catch {}
+try { $('papel').value = localStorage.getItem('papel') || (matchMedia('(pointer: coarse)').matches ? '58' : '80'); } catch {} // teléfono 58, PC 80
 
 const clp = n => '$' + n.toLocaleString('es-CL');
 const montoNum = () => parseInt($('monto').value.replace(/\D/g, ''), 10) || 0;
@@ -145,17 +152,32 @@ function ticket(folio, fecha) {
 
 function render() {
   const mm = +$('papel').value, T = $('ticket');
+  $('btnPc').textContent = `Imprimir ${mm} mm (PC / diálogo)`;
   const esc = s => s.replace(/[&<>]/g, m => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' })[m]);
   // Ancho = zona que realmente imprime el cabezal (papel 80mm imprime ~72mm, 58mm ~48mm). Se calibra en "Datos del negocio".
   const k = mm === 80 ? 1 : 48 / 72;
   T.style.width = (+cfg.ancho || 68) * k + 'mm';
-  T.style.setProperty('--mx', '0mm');
-  T.style.setProperty('--fs', (+cfg.letra || 3.2) * (mm === 80 ? 1 : 0.9) + 'mm');
-  // En HTML el navegador ajusta el texto solo: se usa el texto original (src), no el cortado a N columnas
-  T.innerHTML = ticket(cfg.folio, new Date()).filter((l, i, a) => !l.src || l.src !== a[i - 1]?.src).map(l => (l.src ? { ...l, t: l.src } : l)).map(l =>
-    l.sep ? '<hr>' :
-    l.l ? `<div class="kv"><span>${esc(l.l)}</span><span>${esc(l.r)}</span></div>` :
-    `<div class="${[l.center && 'c', l.bold && 'b', l.big && 'big'].filter(Boolean).join(' ')}">${esc(l.t)}</div>`).join('');
+    T.style.setProperty('--fs', (+cfg.letra || 3.2) * (mm === 80 ? 1 : 0.9) + 'mm');
+  const f = new Date(), g = $('glosa').value.trim();
+  const fila = (a, b) => `<tr><td>${a}</td><td>${esc(b)}</td></tr>`;
+  T.innerHTML = `
+    <div class="head">
+      <div class="marca">${esc(cfg.nombre)}</div>
+      ${cfg.rut ? `<div class="sub">RUT ${esc(cfg.rut)}</div>` : ''}
+      ${cfg.dir ? `<div class="sub">${esc(cfg.dir)}</div>` : ''}
+      ${cfg.fono ? `<div class="sub">${esc(cfg.fono)}</div>` : ''}
+    </div>
+    <div class="banda">COMPROBANTE DE PAGO</div>
+    <table>
+      ${fila('N° Comprobante', String(cfg.folio).padStart(6, '0'))}
+      ${fila('Fecha', f.toLocaleDateString('es-CL'))}
+      ${fila('Hora', f.toLocaleTimeString('es-CL', { hour:'2-digit', minute:'2-digit', hour12:false }))}
+      ${fila('Medio de pago', $('medio').value)}
+    </table>
+    ${g ? `<div class="glosa">${esc(g)}</div>` : ''}
+    <div class="total"><span>TOTAL</span><b>${clp(montoNum())}</b></div>
+    ${cfg.pie ? `<div class="pie">${esc(cfg.pie)}</div>` : ''}
+    <div class="mini">Conserve este comprobante</div>`;
   // Sin 'size': manda el papel del driver (ej. BIXOLON 80x297). Si no coincide, Chrome escala y centra el ticket.
   $('pagina').textContent = '@page { margin: 0; }';
 }
